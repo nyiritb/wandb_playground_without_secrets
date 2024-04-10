@@ -1,0 +1,62 @@
+name: WandB Artifact to S3
+
+on:
+  repository_dispatch:
+    types: [deploy-event]
+
+
+jobs:
+  deploy-event:
+    runs-on: ubuntu-latest
+    env:
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: 'us-west-2'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.7.13'
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: pip install wandb boto3
+
+    - name: Login to W&B
+      run: wandb login
+
+    - name: Echo Template Strings from W&B Webhook
+      run: |
+        echo -e "${{ github.event.client_payload.my_custom_string1 }}\n\
+        ${{ github.event.client_payload.my_custom_string2 }}\n\
+        ${{ github.event.client_payload.event_type }}\n\
+        ${{ github.event.client_payload.event_author }}\n\
+        ${{ github.event.client_payload.artifact_version }}\n\
+        ${{ github.event.client_payload.artifact_version_string }}\n\
+        ${{ github.event.client_payload.artifact_collection_name }}\n\
+        ${{ github.event.client_payload.project_name }}\n\
+        ${{ github.event.client_payload.entity_name }}"
+    
+    - name: Retrieve Artifacts
+      run: python .github/workflows/retrieve_artifacts.py --registered_model_name "${{ github.event.client_payload.artifact_version_string }}"
+
+    - name: echo artifacts
+      run: ls artifact_cache/models
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+    - name: Upload Artifact to S3
+      run: python .github/workflows/upload_to_s3.py
+      env:
+        S3_BUCKET: 'nytuaai-wandb-artifacts'
+        LOCAL_ARTIFACT_PATH: "artifact_cache/models/wandb-job.json"
+        S3_ARTIFACT_KEY: "${{ github.event.client_payload.artifact_version_string }}"
